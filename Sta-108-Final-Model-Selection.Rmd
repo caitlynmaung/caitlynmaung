@@ -1,0 +1,165 @@
+---
+title: "Sta 108 Final Model Selection"
+output: html_notebook
+---
+
+This is an [R Markdown](http://rmarkdown.rstudio.com) Notebook. When you execute code within the notebook, the results appear beneath the code. 
+
+Try executing this chunk by clicking the *Run* button within the chunk or by placing your cursor inside it and pressing *Cmd+Shift+Enter*. 
+
+
+```{r}
+insurance <- read.csv("~/Downloads/insurance.csv")
+```
+
+```{r}
+install.packages("ppcor")
+```
+
+```{r}
+install.packages("tidyverse")
+```
+
+```{r}
+names(insurance)
+```
+
+```{r}
+library(corrplot)
+```
+
+```{r}
+# excluding categorical variables
+numeric.variables <- insurance[sapply(insurance, is.numeric)]
+datamatrix <- cor(numeric.variables)
+corrplot(datamatrix,method = "number")
+```
+
+```{r}
+library(ppcor)
+```
+
+```{r}
+pcor(numeric.variables,method = "pearson")
+```
+After creating a correlation matrix between the numeric variables (not categorical) in the model,we computed the t-statistics and corresponding p values for the independent variables and tested whether there was highly significant correlations (p-value << 0.01) between the variables. 
+High correlation between variables indicates that we could possibly remove them from the model since they provide similar information. 
+
+We found a high correlation between age and charges (p-value = 5.533923e-26), 
+and bmi and charges for the house (p-value = 1.354882e-10).
+Since charges is the Y variable, we can conclude there is no significant correlation between age and bmi as X variables.
+
+After this, we needed to use model selection techniques to pick the regressors in our final model.
+Our goal is interpretation so we need the correct model.
+When comparing models of different sizes, we use the Bayes information criterion (BIC) as our model selection criteria. The goal is to minimize BIC because it tends to pick the correct model.
+
+
+Full model is:
+charges = -11938.5 + 256.9(age) -131.3(sexmale) + 339.2(bmi) + 475.5(children) + 23848.5(smokeryes) -353(regionnorthwest) - 1035(regionsoutheast) - 960(regionsouthwest)
+```{r}
+full.model = lm(charges~., insurance)
+summary(full.model)
+empty.model = lm(charges~1, insurance)
+summary(empty.model)
+```
+
+```{r}
+#normal Q-Q plot
+qqnorm(full.model$residuals)
+qqline(full.model$residuals)
+```
+
+We can observe that the plot is non-normal because there are points that deviate from the line, there are outliers, and that there is no obvious pattern.
+
+```{r}
+the.SWtest = shapiro.test(full.model$residuals)
+the.SWtest
+```
+The errors are not normally distributed.
+
+
+How many possible models:
+```{r}
+library(tidyverse)
+formulas = map(1:5, ~ combn(paste0("x",1:5), .x) %>% 
+      apply(., 2, function(v) paste0("y ~ ", paste(v, collapse=" + ")))) %>% 
+  unlist
+
+formulas
+```
+
+
+Forward-Backward AND Backward-Forward step-wise selection
+```{r}
+# FB = forward-backward
+FB.model.BIC = stepAIC(empty.model,  scope = list(lower = empty.model, upper= full.model), k = log(n),trace=FALSE,direction = "both")
+FB.model.BIC
+
+# BF = backward-forward
+BF.model.BIC = stepAIC(full.model,  scope = list(lower = empty.model, upper= full.model), k = log(n),trace=FALSE,direction = "both")
+BF.model.BIC
+
+FB.model.BIC$coefficients
+BF.model.BIC$coefficients
+```
+We can see that BF and FB stepwise selection with BIC agree.
+
+Thus our final model:
+charges = -12102.8 + 257.8(age) + 321.9(bmi) + 473.5(children) + 23811.4(smokeryes)
+Note that sex and region are dropped here.
+
+```{r}
+#fitting the model
+my.model = lm(charges~ age + bmi + children + smoker, insurance)
+summary(my.model)
+```
+```{r}
+par(mfrow = c(2, 2))
+plot(my.model)
+```
+
+#check assumptions for the final model
+```{r}
+qqnorm(my.model$residuals)
+qqline(my.model$residuals)
+```
+```{r}
+the.SWtest = shapiro.test(my.model$residuals)
+the.SWtest
+```
+
+```{r}
+best.model <- my.model
+ei.s = best.model$residuals/sqrt(sum(best.model$residuals^2)/(nrow(insurance) - length(best.model$coefficients)))
+
+ri = rstandard(best.model)
+
+ti = rstudent(best.model)
+
+par(mfrow =c(2,2))
+
+hist(ei.s,main ="Semi-studentized/standardized residuals")
+hist(ri,main="Studentized/Standardized residuals")
+hist(ti, main="Deleted Residuals")
+
+# identify outliers
+
+alpha = 0.1 ; n = nrow(insurance); p = length(best.model$coefficients)
+cutoff = qt(1-alpha/(2*n), n -p )
+cutoff
+```
+
+```{r}
+cutoff.deleted = qt(1-alpha/(2*n), n -p -1 )
+cutoff.deleted
+```
+
+```{r}
+outliers = which(abs(ei.s)> cutoff | abs(ri) > cutoff | abs(ti) > cutoff.deleted)
+outliers
+```
+
+```{r}
+insurance.no.outlier <- insurance[!outliers]
+insurance.no.outlier
+```
